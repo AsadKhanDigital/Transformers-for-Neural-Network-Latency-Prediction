@@ -6,32 +6,23 @@ import time
 import gc
 from tensorflow.keras import backend as K
 
-
-# Set seeds for reproducibility (optional)
 random.seed(42)
 np.random.seed(42)
 tf.random.set_seed(42)
 
-#############################
-# Hyperparameters & Config
-#############################
-TOTAL_NETWORKS = 320000  # Increased to 320,000
+TOTAL_NETWORKS = 320000
 MIN_DEPTH = 3
 MAX_DEPTH = 10
-INPUT_DIM = 128  # dimension of the input layer
-OUTPUT_DIM = 10  # dimension of the output layer
-HIDDEN_UNITS_POW_RANGE = (0, 14)  # from 2^0=1 to 2^14=16384
-NUM_LATENCY_RUNS = 5  # Keep low to reduce overhead
-SAVE_BATCH_SIZE = 10000  # Save every 10,000 samples
+INPUT_DIM = 128
+OUTPUT_DIM = 10
+HIDDEN_UNITS_POW_RANGE = (0, 14)
+NUM_LATENCY_RUNS = 5
+SAVE_BATCH_SIZE = 10000
 
 DATA_SAVE_DIR = "./network_dataset"
 os.makedirs(DATA_SAVE_DIR, exist_ok=True)
 
-ATTR_DIM = 3  # [op_type_1, op_type_2, num_weights]
-
-#############################
-# Helper Functions
-#############################
+ATTR_DIM = 3
 
 def build_random_network():
     depth = random.randint(MIN_DEPTH, MAX_DEPTH)
@@ -86,7 +77,6 @@ def pad_graph_representation(adjacency, attributes, max_depth=MAX_DEPTH, attr_di
 
 def measure_inference_latency(model):
     dummy_input = np.random.randn(1, INPUT_DIM).astype(np.float32)
-    # Warm-up runs
     for _ in range(5):
         model.predict(dummy_input, verbose=0)
 
@@ -98,10 +88,6 @@ def measure_inference_latency(model):
         times.append(end - start)
     median_latency = np.median(times)
     return median_latency
-
-#############################
-# Dataset Generation
-#############################
 
 def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_size=10000):
     start_time = time.time()
@@ -121,11 +107,9 @@ def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_s
         attributes_list.append(attr)
         latencies.append(latency)
 
-        # Clear session and run garbage collection after each model to free resources
         K.clear_session()
         gc.collect()
 
-        # Save partial results
         if (i+1) % save_batch_size == 0:
             batch_id = (i+1) // save_batch_size
             file_path = os.path.join(save_dir, f"dataset_part_{batch_id}.npz")
@@ -136,18 +120,15 @@ def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_s
                 latencies=np.array(latencies, dtype=np.float32)
             )
 
-            # Clear lists to free memory
             adjacency_list = []
             attributes_list = []
             latencies = []
 
-            # Extra resource cleanup after each batch save
             K.clear_session()
             gc.collect()
 
             print(f"Saved batch {batch_id}, {i+1} networks processed.")
 
-    # Save any remainder not divisible by save_batch_size
     if adjacency_list:
         batch_id = total_networks // save_batch_size + 1
         file_path = os.path.join(save_dir, f"dataset_part_{batch_id}.npz")
@@ -158,7 +139,6 @@ def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_s
             latencies=np.array(latencies, dtype=np.float32)
         )
 
-        # Clean up after final save
         K.clear_session()
         gc.collect()
         print(f"Saved final batch {batch_id}.")
@@ -167,6 +147,4 @@ def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_s
     total_duration = end_time - start_time
     print(f"Total time taken to generate the dataset: {total_duration:.2f} seconds")
 
-
-# Run dataset generation for 320,000 networks, saving every 10,000
 generate_dataset(total_networks=320000, save_batch_size=10000)
