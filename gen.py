@@ -3,7 +3,9 @@ import numpy as np
 import tensorflow as tf
 import random
 import time
+import gc
 from tensorflow.keras import backend as K
+
 
 # Set seeds for reproducibility (optional)
 random.seed(42)
@@ -13,14 +15,14 @@ tf.random.set_seed(42)
 #############################
 # Hyperparameters & Config
 #############################
-TOTAL_NETWORKS = 50000  # Reduced to 50,000
+TOTAL_NETWORKS = 320000  # Increased to 320,000
 MIN_DEPTH = 3
 MAX_DEPTH = 10
 INPUT_DIM = 128  # dimension of the input layer
 OUTPUT_DIM = 10  # dimension of the output layer
 HIDDEN_UNITS_POW_RANGE = (0, 14)  # from 2^0=1 to 2^14=16384
-NUM_LATENCY_RUNS = 5  # Reduced to ease overhead
-SAVE_BATCH_SIZE = 10000  # how many samples to collect before saving a partial dataset
+NUM_LATENCY_RUNS = 5  # Keep low to reduce overhead
+SAVE_BATCH_SIZE = 10000  # Save every 10,000 samples
 
 DATA_SAVE_DIR = "./network_dataset"
 os.makedirs(DATA_SAVE_DIR, exist_ok=True)
@@ -101,7 +103,7 @@ def measure_inference_latency(model):
 # Dataset Generation
 #############################
 
-def generate_dataset(total_networks=50000, save_dir=DATA_SAVE_DIR, save_batch_size=10000):
+def generate_dataset(total_networks=320000, save_dir=DATA_SAVE_DIR, save_batch_size=10000):
     start_time = time.time()
 
     adjacency_list = []
@@ -112,45 +114,59 @@ def generate_dataset(total_networks=50000, save_dir=DATA_SAVE_DIR, save_batch_si
         model, layer_units = build_random_network()
         adj, attr = get_graph_representation(model, layer_units)
         adj, attr = pad_graph_representation(adj, attr, max_depth=MAX_DEPTH, attr_dim=ATTR_DIM)
+
         latency = measure_inference_latency(model)
 
         adjacency_list.append(adj)
         attributes_list.append(attr)
         latencies.append(latency)
 
-        # Clear session to free up resources
+        # Clear session and run garbage collection after each model to free resources
         K.clear_session()
+        gc.collect()
 
         # Save partial results
         if (i+1) % save_batch_size == 0:
             batch_id = (i+1) // save_batch_size
+            file_path = os.path.join(save_dir, f"dataset_part_{batch_id}.npz")
             np.savez_compressed(
-                os.path.join(save_dir, f"dataset_part_{batch_id}.npz"),
+                file_path,
                 adjacency=np.array(adjacency_list, dtype=np.float32),
                 attributes=np.array(attributes_list, dtype=np.float32),
                 latencies=np.array(latencies, dtype=np.float32)
             )
+
+            # Clear lists to free memory
             adjacency_list = []
             attributes_list = []
             latencies = []
-            print(f"Saved batch {batch_id}, {i+1} networks processed.")
-            # Clear session again after saving a batch
-            K.clear_session()
 
-    # Save the remainder if any
+            # Extra resource cleanup after each batch save
+            K.clear_session()
+            gc.collect()
+
+            print(f"Saved batch {batch_id}, {i+1} networks processed.")
+
+    # Save any remainder not divisible by save_batch_size
     if adjacency_list:
         batch_id = total_networks // save_batch_size + 1
+        file_path = os.path.join(save_dir, f"dataset_part_{batch_id}.npz")
         np.savez_compressed(
-            os.path.join(save_dir, f"dataset_part_{batch_id}.npz"),
+            file_path,
             adjacency=np.array(adjacency_list, dtype=np.float32),
             attributes=np.array(attributes_list, dtype=np.float32),
             latencies=np.array(latencies, dtype=np.float32)
         )
+
+        # Clean up after final save
+        K.clear_session()
+        gc.collect()
         print(f"Saved final batch {batch_id}.")
 
     end_time = time.time()
     total_duration = end_time - start_time
     print(f"Total time taken to generate the dataset: {total_duration:.2f} seconds")
 
-# Generate 50,000 networks with saves every 10,000
-generate_dataset(total_networks=50000, save_batch_size=10000)
+
+# Run dataset generation for 320,000 networks, saving every 10,000
+generate_dataset(total_networks=320000, save_batch_size=10000)
